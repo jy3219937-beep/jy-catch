@@ -5,28 +5,26 @@ import { prisma } from "@/lib/db";
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { name, school, grade, currentTier, targetTier } = body ?? {};
+    const { name, school, grade } = body ?? {};
 
-    if (
-      !name?.trim() ||
-      !school?.trim() ||
-      grade == null ||
-      currentTier == null ||
-      targetTier == null
-    ) {
+    if (!name?.trim() || !school?.trim() || grade == null) {
       return NextResponse.json(
         { error: "모든 항목을 입력해주세요." },
         { status: 400 }
       );
     }
 
+    // 현재/목표 등급은 입력받지 않고 고정: 모두 현재 3등급 → 목표 1.3등급
+    const START_TIER = 3.0;
+    const GOAL_TIER = 1.3;
+
     const player = await prisma.player.create({
       data: {
         name: String(name).trim(),
         school: String(school).trim(),
         grade: Number(grade),
-        currentTier: Number(currentTier),
-        targetTier: Number(targetTier),
+        currentTier: START_TIER,
+        targetTier: GOAL_TIER,
         status: "waiting",
       },
     });

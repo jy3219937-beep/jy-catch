@@ -7,8 +7,6 @@ export default function JoinPage() {
   const [name, setName] = useState("");
   const [school, setSchool] = useState("");
   const [grade, setGrade] = useState(1);
-  const [currentTier, setCurrentTier] = useState("2.0");
-  const [targetTier, setTargetTier] = useState("1.5");
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState<{ ahead: number; name: string } | null>(
     null
@@ -27,8 +25,7 @@ export default function JoinPage() {
           name,
           school,
           grade,
-          currentTier: parseFloat(currentTier),
-          targetTier: parseFloat(targetTier),
+          // 현재/목표 등급은 입력받지 않고 고정(현재 3.0 → 목표 1.3)
         }),
       });
       const data = await res.json();
@@ -114,29 +111,22 @@ export default function JoinPage() {
           ))}
         </div>
 
-        <label style={label}>현재 등급</label>
-        <input
-          style={input}
-          type="number"
-          step="0.1"
-          min="1"
-          max="9"
-          value={currentTier}
-          onChange={(e) => setCurrentTier(e.target.value)}
-          required
-        />
-
-        <label style={label}>목표 등급</label>
-        <input
-          style={input}
-          type="number"
-          step="0.1"
-          min="1"
-          max="9"
-          value={targetTier}
-          onChange={(e) => setTargetTier(e.target.value)}
-          required
-        />
+        <div
+          style={{
+            background: "#0d0d18",
+            border: "1px solid #2a2a44",
+            borderRadius: 10,
+            padding: "12px 14px",
+            marginBottom: 14,
+            fontSize: 13,
+            color: "#9ac",
+            lineHeight: 1.6,
+          }}
+        >
+          🎯 모두 <b style={{ color: "#cde" }}>현재 3등급</b>에서 시작합니다.
+          <br />
+          매 학기 열심히 잡아 <b style={{ color: "#8f8" }}>1등급</b>에 도전하세요!
+        </div>
 
         {error && (
           <p style={{ color: "#f77", fontSize: 13, margin: "8px 0 0" }}>

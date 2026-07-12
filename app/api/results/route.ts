@@ -2,14 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import {
   computeDifficulty,
-  scoreToTier,
+  finalTierFromSemesters,
   tierToDepartment,
 } from "@/lib/game-config";
 
 // POST /api/results — 게임 종료 후 결과 저장 (달성등급/학과는 서버에서 산출)
 export async function POST(req: NextRequest) {
   try {
-    const { playerId, finalScore } = await req.json();
+    const { playerId, finalScore, semesterGrades } = await req.json();
     if (!playerId || finalScore == null) {
       return NextResponse.json({ error: "필수 값 누락" }, { status: 400 });
     }
@@ -27,8 +27,17 @@ export async function POST(req: NextRequest) {
       player.targetTier,
       player.grade
     );
-    const achievedTier = scoreToTier(Number(finalScore), difficulty);
-    const department = tierToDepartment(achievedTier);
+    // 학기별 등급 → 최종 등급을 서버에서 재산출(신뢰 가능한 값 저장).
+    const grades: number[] = Array.isArray(semesterGrades)
+      ? semesterGrades.map(Number)
+      : [];
+    const achievedTier = finalTierFromSemesters(
+      player.currentTier,
+      player.targetTier,
+      grades
+    );
+    // 합격 학과. 불합격(2.0 초과)이면 빈 문자열로 저장.
+    const department = tierToDepartment(achievedTier) ?? "";
 
     // upsert: 같은 player가 다시 저장하면 갱신
     const result = await prisma.gameResult.upsert({

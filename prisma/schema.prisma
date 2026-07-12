@@ -21,6 +21,19 @@ model Player {
   result GameResult?
 }
 
+/// 관리자가 실시간 조절하는 게임 설정 (단일 행: id="singleton")
+model Settings {
+  id             String   @id @default("singleton")
+  difficultyMult Float    @default(1.0) // 전체 난이도 배율 (0.7~1.5)
+  // 등급 기준점: "높은 잡기율 → 좋은 등급 / 낮은 잡기율 → 나쁜 등급" 두 점으로 곡선 결정.
+  highCatch      Float    @default(0.9) // 기준점1 잡기율 (예: 0.9)
+  highGrade      Float    @default(1.1) // 그때 목표 등급 (예: 1.1)
+  lowCatch       Float    @default(0.4) // 기준점2 잡기율 (예: 0.4)
+  lowGrade       Float    @default(3.0) // 그때 목표 등급 (예: 3.0)
+  wrongPenalty   Float    @default(0.5) // 방해 오터치 페널티
+  updatedAt      DateTime @updatedAt
+}
+
 /// 게임 종료 후 기록 = 리더보드 항목
 model GameResult {
   id           String   @id @default(cuid())
