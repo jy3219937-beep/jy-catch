@@ -1,0 +1,36 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+/// 신청 = 대기열 항목이자 참가자
+model Player {
+  id          String   @id @default(cuid())
+  name        String
+  school      String
+  grade       Int // 학년 (1/2/3)
+  currentTier Float // 현재 등급 (예: 2.0)
+  targetTier  Float // 목표 등급 (예: 1.3)
+  status      String   @default("waiting") // waiting | playing | done
+  createdAt   DateTime @default(now()) // 신청 시각 = 대기 순서 기준
+
+  result GameResult?
+}
+
+/// 게임 종료 후 기록 = 리더보드 항목
+model GameResult {
+  id           String   @id @default(cuid())
+  playerId     String   @unique
+  player       Player   @relation(fields: [playerId], references: [id])
+  name         String // 순위 표시용 (비정규화)
+  school       String
+  finalScore   Int
+  achievedTier Float // 달성 등급
+  department   String // 매핑된 서강대 학과명
+  difficulty   Float // 계산된 난이도 계수 D (기록/분석용)
+  createdAt    DateTime @default(now())
+}
