@@ -14,6 +14,7 @@ import {
   type GameSettings,
 } from "@/lib/game-config";
 import type { TrackedHand } from "@/lib/useHandTracking";
+import { drawZoomedVideo } from "@/lib/useHandTracking";
 
 type Shape = "circle" | "square" | "hexagon" | "triangle" | "diamond";
 
@@ -88,6 +89,7 @@ type Props = {
   videoRef: React.RefObject<HTMLVideoElement | null>;
   ready: boolean;
   detect: () => TrackedHand[];
+  zoomRef: React.RefObject<number>; // 소프트웨어 줌 배율 (표시 크롭용)
 };
 
 // 게임 진행(학기별 스테이지) + 캠 배경 위 낙하 물체 + 손인식 집기.
@@ -101,6 +103,7 @@ export default function GameCanvas({
   videoRef,
   ready,
   detect,
+  zoomRef,
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -147,6 +150,7 @@ export default function GameCanvas({
   const caughtRef = useRef(0);
   const spawnedRef = useRef(0);
   const wrongRef = useRef(0); // 잘못 집은 방해용어 수
+  const clapPrevDistRef = useRef(Infinity); // 직전 프레임 두 손 사이 거리 (박수 전환 감지)
   const semesterGradesRef = useRef<number[]>([]);
 
   const spawnItem = useCallback(() => {
@@ -232,75 +236,92 @@ export default function GameCanvas({
     []
   );
 
-  // 집기 판정: 손이 justPinched인 순간, 손 위치와 겹친 아이템을 터트림
-  const tryPop = useCallback(
-    (hands: TrackedHand[], W: number, H: number) => {
-      for (const h of hands) {
-        if (!h.detected || !h.justPinched) continue;
-        const hx = h.palm.x;
-        const hy = h.palm.y;
-        // 가장 가까운(겹친) 미터짐 아이템 하나
-        let hit: FallingItem | null = null;
-        let best = 0.15; // 판정 반경(정규화) — 물체가 커진 만큼 여유 있게
-        for (const it of itemsRef.current) {
-          if (it.popped) continue;
-          const dx = it.x - hx;
-          const dy = it.y - hy;
-          const d = Math.hypot(dx, dy);
-          if (d < best) {
-            best = d;
-            hit = it;
-          }
-        }
-        if (hit) {
-          hit.popped = true;
-          if (hit.harmful) {
-            // 방해용어 집음 → 점수 감점 + 콤보 리셋 + 흔들림 + 정확도 페널티(0.5개 차감)
-            burst(hit.x, hit.y, true);
-            scoreRef.current += SCORE.harmfulPenalty;
-            wrongRef.current += 1;
-            comboRef.current = 0;
-            shakeRef.current = 1;
-            addFloat(hit.x, hit.y, `${SCORE.harmfulPenalty}`, "#ff6b6b", 26);
-          } else {
-            // 도움용어 집음 → 정확도 정답 + 가점 + 콤보
-            caughtRef.current += 1;
-            comboRef.current += 1;
-            const combo = comboRef.current;
-            const bonus = Math.min(SCORE.maxComboBonus, combo * SCORE.comboStep);
-            const gained = SCORE.helpfulBase + bonus;
-            scoreRef.current += gained;
+  // 물체 하나를 터트리고 점수/콤보/이펙트 처리
+  const popItem = useCallback(
+    (hit: FallingItem) => {
+      hit.popped = true;
+      if (hit.harmful) {
+        // 방해용어 → 감점 + 콤보 리셋 + 흔들림 + 정확도 페널티
+        burst(hit.x, hit.y, true);
+        scoreRef.current += SCORE.harmfulPenalty;
+        wrongRef.current += 1;
+        comboRef.current = 0;
+        shakeRef.current = 1;
+        addFloat(hit.x, hit.y, `${SCORE.harmfulPenalty}`, "#ff6b6b", 26);
+      } else {
+        // 도움용어 → 정답 + 가점 + 콤보
+        caughtRef.current += 1;
+        comboRef.current += 1;
+        const combo = comboRef.current;
+        const bonus = Math.min(SCORE.maxComboBonus, combo * SCORE.comboStep);
+        const gained = SCORE.helpfulBase + bonus;
+        scoreRef.current += gained;
 
-            burst(hit.x, hit.y, false, combo);
-            // 획득 점수 팝업 (콤보 높을수록 크게/뜨겁게)
-            const ct = comboTier(combo);
-            addFloat(
-              hit.x,
-              hit.y,
-              `+${gained}`,
-              combo >= 3 ? ct.color : "#8fffb0",
-              22 + Math.min(18, combo * 1.5)
-            );
-            // 콤보 팝업 (3콤보부터)
-            if (combo >= 3) {
-              addFloat(
-                hit.x,
-                hit.y - 0.05,
-                `${combo} COMBO ${ct.label}`,
-                ct.color,
-                20 + Math.min(20, combo)
-              );
-              // 마일스톤(3/6/10/15)에서 화면 플래시
-              if ([3, 6, 10, 15].includes(combo)) comboFlashRef.current = 1;
-            }
-          }
-          if (scoreRef.current < 0) scoreRef.current = 0;
-          setScore(scoreRef.current);
-          setCombo(comboRef.current);
+        burst(hit.x, hit.y, false, combo);
+        const ct = comboTier(combo);
+        addFloat(
+          hit.x,
+          hit.y,
+          `+${gained}`,
+          combo >= 3 ? ct.color : "#8fffb0",
+          22 + Math.min(18, combo * 1.5)
+        );
+        if (combo >= 3) {
+          addFloat(
+            hit.x,
+            hit.y - 0.05,
+            `${combo} COMBO ${ct.label}`,
+            ct.color,
+            20 + Math.min(20, combo)
+          );
+          if ([3, 6, 10, 15].includes(combo)) comboFlashRef.current = 1;
         }
       }
+      if (scoreRef.current < 0) scoreRef.current = 0;
+      setScore(scoreRef.current);
+      setCombo(comboRef.current);
     },
     [burst, addFloat]
+  );
+
+  // 박수 판정: 두 손이 감지된 상태에서 손 사이 거리가 임계값보다 가까워지는 "순간"에,
+  // 두 손 중간 지점에 가장 가까운 물체 하나를 터트린다.
+  const tryPop = useCallback(
+    (hands: TrackedHand[]) => {
+      const a = hands[0];
+      const b = hands[1];
+      if (!a?.detected || !b?.detected) {
+        clapPrevDistRef.current = Infinity;
+        return;
+      }
+      const dx = a.palm.x - b.palm.x;
+      const dy = a.palm.y - b.palm.y;
+      const dist = Math.hypot(dx, dy);
+
+      const CLAP_DIST = 0.06; // 이보다 가까워지면 박수로 인정 (두 손이 확실히 맞닿아야)
+      const prev = clapPrevDistRef.current;
+      clapPrevDistRef.current = dist;
+
+      // 멀리 있다가(prev>=임계) 가까워진(now<임계) 전환 순간에만 발동 → 연타 방지
+      if (!(prev >= CLAP_DIST && dist < CLAP_DIST)) return;
+
+      // 두 손 중간 지점
+      const cx = (a.palm.x + b.palm.x) / 2;
+      const cy = (a.palm.y + b.palm.y) / 2;
+      // 중간 지점에서 가장 가까운 미터짐 물체 하나
+      let hit: FallingItem | null = null;
+      let best = 0.12; // 박수 지점 판정 반경 (손 사이에 정확히 낀 물체만)
+      for (const it of itemsRef.current) {
+        if (it.popped) continue;
+        const d = Math.hypot(it.x - cx, it.y - cy);
+        if (d < best) {
+          best = d;
+          hit = it;
+        }
+      }
+      if (hit) popItem(hit);
+    },
+    [popItem]
   );
 
   const nextStageOrFinish = useCallback(() => {
@@ -406,13 +427,8 @@ export default function GameCanvas({
         ctx.save();
         ctx.translate(W, 0);
         ctx.scale(-1, 1);
-        // cover 방식으로 꽉 채우기
-        const vw = video.videoWidth || 1280;
-        const vh = video.videoHeight || 720;
-        const scale = Math.max(W / vw, H / vh);
-        const dw = vw * scale;
-        const dh = vh * scale;
-        ctx.drawImage(video, (W - dw) / 2, (H - dh) / 2, dw, dh);
+        // 손 인식과 동일한 줌(중앙 크롭)으로 그려 손 골격과 영상 정합.
+        drawZoomedVideo(ctx, video, W, H, zoomRef.current);
         ctx.restore();
         // 살짝 어둡게 (물체 가독성)
         ctx.fillStyle = "rgba(10,10,25,0.35)";
@@ -470,7 +486,7 @@ export default function GameCanvas({
       );
 
       // 집기 판정
-      tryPop(hands, W, H);
+      tryPop(hands);
 
       // 파티클
       for (const pt of particlesRef.current) {
@@ -503,7 +519,38 @@ export default function GameCanvas({
       }
       ctx.globalAlpha = 1;
 
-      // 손 골격
+      // 두 손이 모두 감지되면 박수 가이드(손 사이 선 + 중간 지점 표시)
+      const hA = hands[0];
+      const hB = hands[1];
+      if (hA?.detected && hB?.detected) {
+        const ax = hA.palm.x * W,
+          ay = hA.palm.y * H;
+        const bx = hB.palm.x * W,
+          by = hB.palm.y * H;
+        const dist = Math.hypot(hA.palm.x - hB.palm.x, hA.palm.y - hB.palm.y);
+        const near = dist < 0.12; // 판정(0.06) 직전에 강조 → "곧 터진다" 신호
+        ctx.strokeStyle = near
+          ? "rgba(120,220,255,0.95)"
+          : "rgba(255,255,255,0.35)";
+        ctx.lineWidth = near ? 4 : 2;
+        ctx.setLineDash(near ? [] : [8, 8]);
+        ctx.beginPath();
+        ctx.moveTo(ax, ay);
+        ctx.lineTo(bx, by);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        // 중간 지점(박수 타격점) 표시
+        const mx = (ax + bx) / 2,
+          my = (ay + by) / 2;
+        ctx.beginPath();
+        ctx.arc(mx, my, near ? 16 : 10, 0, Math.PI * 2);
+        ctx.fillStyle = near
+          ? "rgba(120,220,255,0.35)"
+          : "rgba(255,255,255,0.15)";
+        ctx.fill();
+      }
+
+      // 각 손 조준점
       for (const h of hands) {
         if (!h.detected) continue;
         drawHand(ctx, h, W, H);

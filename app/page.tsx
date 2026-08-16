@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import GameCanvas from "./GameCanvas";
 import QRPanel from "./QRPanel";
-import { useHandTracking } from "@/lib/useHandTracking";
+import { useHandTracking, drawZoomedVideo } from "@/lib/useHandTracking";
 import {
   computeDifficulty,
   tierToDepartment,
@@ -47,7 +47,8 @@ export default function MainApp() {
     useState<GameSettings>(DEFAULT_SETTINGS);
 
   // 손 인식은 앱 전체에서 단 하나만 생성 — 대기·게임 화면이 같은 카메라를 공유.
-  const { videoRef, ready, loading, error, start, detect } = useHandTracking();
+  const { videoRef, ready, loading, error, start, detect, zoomRef } =
+    useHandTracking();
 
   // 앱 진입 시 카메라 한 번 시작 (권한 프롬프트도 여기서 한 번만).
   // 브라우저 자동재생 정책상 사용자 상호작용이 필요할 수 있어, 실패 시 버튼으로 재시도.
@@ -211,6 +212,7 @@ export default function MainApp() {
             onStartCamera={() => setCamAsked(true)}
             detect={detect}
             videoRef={videoRef}
+            zoomRef={zoomRef}
             onConfirm={startGame}
             onTest={startTest}
             onShowRanking={() => setScreen("ranking")}
@@ -227,6 +229,7 @@ export default function MainApp() {
             videoRef={videoRef}
             ready={ready}
             detect={detect}
+            zoomRef={zoomRef}
           />
         )}
         {screen === "result" && lastResult && (
@@ -339,6 +342,7 @@ function WaitingScreen({
   onStartCamera,
   detect,
   videoRef,
+  zoomRef,
   onConfirm,
   onTest,
   onShowRanking,
@@ -353,6 +357,7 @@ function WaitingScreen({
   onStartCamera: () => void;
   detect: () => import("@/lib/useHandTracking").TrackedHand[];
   videoRef: React.RefObject<HTMLVideoElement | null>;
+  zoomRef: React.RefObject<number>;
   onConfirm: () => void;
   onTest: () => void;
   onShowRanking: () => void;
@@ -391,16 +396,7 @@ function WaitingScreen({
           cctx.save();
           cctx.translate(W, 0);
           cctx.scale(-1, 1);
-          const vw = video.videoWidth || 1280;
-          const vh = video.videoHeight || 720;
-          const scale = Math.max(W / vw, H / vh);
-          cctx.drawImage(
-            video,
-            (W - vw * scale) / 2,
-            (H - vh * scale) / 2,
-            vw * scale,
-            vh * scale
-          );
+          drawZoomedVideo(cctx, video, W, H, zoomRef.current);
           cctx.restore();
           // 손 위치 점 표시
           for (const h of hands) {
@@ -473,7 +469,7 @@ function WaitingScreen({
             학습 용어는 손으로 잡고, 유혹은 흘려보내라!
           </p>
           <div style={guideChips}>
-            <span style={guideChip}>✋ 손바닥→주먹으로 집기</span>
+            <span style={guideChip}>👏 두 손으로 박수 쳐서 터트리기</span>
             <span style={{ ...guideChip, color: "#8f8" }}>
               🟢 도움 용어 잡기 (놓치면 감점)
             </span>
@@ -589,6 +585,18 @@ function ResultScreen({
   onRanking: () => void;
 }) {
   const { row, rank } = result;
+
+  // 8초 뒤 자동으로 다음 대기자 화면으로. 카운트다운 표시.
+  const [countdown, setCountdown] = useState(8);
+  useEffect(() => {
+    if (countdown <= 0) {
+      onNext();
+      return;
+    }
+    const t = setTimeout(() => setCountdown((c) => c - 1), 1000);
+    return () => clearTimeout(t);
+  }, [countdown, onNext]);
+
   return (
     <div style={center}>
       <div style={{ fontSize: 56, marginBottom: 8 }}>🎉</div>
@@ -625,6 +633,9 @@ function ResultScreen({
           {rank > 0 ? "다음 참가자 ▶" : "대기 화면으로 ▶"}
         </button>
       </div>
+      <p style={{ color: "#778", fontSize: 13, marginTop: 16 }}>
+        {countdown}초 후 자동으로 다음 참가자 준비 화면으로 넘어갑니다
+      </p>
     </div>
   );
 }
